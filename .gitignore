@@ -12,3 +12,5 @@
 *.mp3
 *.index
 *.pth
+
+.DS_Store
