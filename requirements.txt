@@ -51,7 +51,9 @@ networkx==3.2.1
 numba==0.60.0
 numpy==1.23.5
 omegaconf==2.0.6
+openai==1.30.0
 opencv-python==4.11.0.86
+python-dotenv==1.0.0
 packaging==24.2
 pandas==2.2.3
 pillow==11.1.0

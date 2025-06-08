@@ -44,7 +44,7 @@ def correct_fen_if_flipped(fen):
 def detect_chess_pieces(img=None, img_path=None, prev_state=None, engine=None, count = 0):
     """Detect chess pieces on the board and determine correct FEN orientation."""
     current_dir = os.getcwd()
-    model_path = os.path.join(current_dir, "runs", "detect", "train6", "weights", "best.pt")
+    model_path = os.path.join(current_dir, "model", "best.pt")
     
     if img_path:
         img = cv2.imread(img_path)
@@ -116,7 +116,7 @@ def detect_chess_pieces(img=None, img_path=None, prev_state=None, engine=None, c
 
 def process_frames(frames, prev_fen=None):
     """Process multiple frames with a single engine instance."""
-    engine_path = "./stockfish/stockfish-macos-x86-64-bmi2"
+    engine_path = "./stockfish/stockfish-macos-m1-apple-silicon"
     
     # Start the engine just once
     try:

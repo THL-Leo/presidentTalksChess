@@ -14,3 +14,13 @@
 *.pth
 
 .DS_Store
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+env_example.txt
+video.mp4
+README_commentary_system.md
+test_gpt_commentary.py
