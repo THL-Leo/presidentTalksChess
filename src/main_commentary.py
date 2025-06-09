@@ -23,10 +23,15 @@ Requirements:
 import argparse
 import os
 import sys
+import logging
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Enable debug logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Add the project root to Python path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -192,15 +197,17 @@ def main():
     print(f"📁 Output: {output_path}")
     
     # Process the video
+    logger.info(f"Starting video processing: {args.video_path} -> {output_path}")
+    logger.info(f"Parameters: president={args.president}, interval={args.interval}s")
     print("\n🚀 Starting video processing...")
     
-    success = process_chess_video_with_commentary(
+    success = asyncio.run(process_chess_video_with_commentary(
         input_video=args.video_path,
         output_video=output_path,
         president=args.president,
         frame_interval=args.interval,
         openai_api_key=args.openai_key
-    )
+    ))
     
     if success:
         print(f"\n🎉 Success! Commentary video created: {output_path}")

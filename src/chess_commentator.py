@@ -6,8 +6,14 @@ from dataclasses import dataclass
 import json
 import openai
 import os
+import asyncio
+import logging
 from time import sleep
 from dotenv import load_dotenv
+
+# Enable debug logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -194,42 +200,59 @@ Commentary:"""
 
         return prompt
 
-    def start_engine(self):
-        """Initialize the chess engine"""
+    async def start_engine(self):
+        """Initialize the chess engine asynchronously"""
         try:
-            self.engine = chess.engine.SimpleEngine.popen_uci(self.engine_path)
+            logger.info(f"Starting Stockfish engine at: {self.engine_path}")
+            self.transport, self.engine = await chess.engine.popen_uci(self.engine_path)
+            logger.info("Stockfish engine started successfully")
+            print("Stockfish engine started successfully")
             return True
         except Exception as e:
+            logger.error(f"Failed to start engine: {e}")
             print(f"Failed to start engine: {e}")
+            self.transport = None
+            self.engine = None
             return False
 
-    def stop_engine(self):
-        """Clean up the chess engine"""
+    async def stop_engine(self):
+        """Clean up the chess engine asynchronously"""
         if self.engine:
             try:
-                self.engine.quit()
-            except:
-                pass
+                logger.info("Stopping Stockfish engine")
+                await self.engine.quit()
+                logger.info("Stockfish engine stopped successfully")
+                print("Stockfish engine stopped")
+            except Exception as e:
+                logger.error(f"Error stopping engine: {e}")
+                print(f"Error stopping engine: {e}")
+            self.transport = None
+            self.engine = None
 
-    def analyze_position(self, fen: str, depth: int = 10) -> Dict:
-        """Analyze a chess position and return evaluation and best moves"""
+    async def analyze_position(self, fen: str, depth: int = 3) -> Dict:
+        """Analyze a chess position and return evaluation and best moves asynchronously"""
         try:
+            logger.debug(f"Analyzing position: {fen[:50]}... (depth={depth})")
             board = chess.Board(fen)
             
             if not self.engine:
+                logger.warning("No engine available for analysis")
                 return {"evaluation": 0.0, "best_move": None, "pv": []}
             
-            info = self.engine.analyse(board, chess.engine.Limit(depth=depth, time=self.stockfish_time_limit))
+            info = await self.engine.analyse(board, chess.engine.Limit(depth=depth, time=self.stockfish_time_limit))
             score = info["score"].relative
             
             eval_score = 0.0
             if score.is_mate():
                 eval_score = 10000 if score.mate() > 0 else -10000
+                logger.debug(f"Mate detected: {score.mate()} moves")
             else:
                 eval_score = score.score(mate_score=10000) / 100.0  # Convert to pawns
             
             best_move = info.get("pv", [None])[0]
             pv = info.get("pv", [])
+            
+            logger.debug(f"Analysis complete: eval={eval_score:.2f}, best_move={best_move}")
             
             return {
                 "evaluation": eval_score,
@@ -238,6 +261,7 @@ Commentary:"""
                 "is_mate": score.is_mate() if hasattr(score, 'is_mate') else False
             }
         except Exception as e:
+            logger.error(f"Analysis error for FEN {fen[:30]}: {e}")
             print(f"Analysis error: {e}")
             return {"evaluation": 0.0, "best_move": None, "pv": []}
 
@@ -313,9 +337,12 @@ Commentary:"""
         """Generate natural commentary for a specific move using GPT"""
         return self.generate_gpt_commentary(board, move, analysis, move_quality, previous_board)
 
-    def analyze_game_sequence(self, fen_sequence: List[str], timestamps: List[float]) -> List[CommentaryEvent]:
-        """Analyze a sequence of FEN positions and generate commentary events"""
-        if not self.start_engine():
+    async def analyze_game_sequence(self, fen_sequence: List[str], timestamps: List[float]) -> List[CommentaryEvent]:
+        """Analyze a sequence of FEN positions and generate commentary events asynchronously"""
+        logger.info(f"Starting analysis of {len(fen_sequence)} positions")
+        
+        if not await self.start_engine():
+            logger.warning("Running without engine - commentary will be limited")
             print("Warning: Running without engine - commentary will be limited")
         
         commentary_events = []
@@ -324,8 +351,9 @@ Commentary:"""
         try:
             for i, (fen, timestamp) in enumerate(zip(fen_sequence, timestamps)):
                 try:
+                    logger.debug(f"Processing position {i+1}/{len(fen_sequence)} at timestamp {timestamp:.1f}s")
                     board = chess.Board(fen)
-                    analysis = self.analyze_position(fen)
+                    analysis = await self.analyze_position(fen)
                     current_eval = analysis.get("evaluation", 0.0)
                     
                     # Determine what move was played (if any)
@@ -346,6 +374,9 @@ Commentary:"""
                             self.previous_eval, current_eval, is_white_move
                         )
                         
+                        move_san = previous_board.san(move_played)
+                        logger.debug(f"Found move: {move_san} (quality: {move_quality}, eval change: {current_eval - self.previous_eval:.2f})")
+                        
                         commentary_text = self.generate_move_commentary(
                             board, move_played, analysis, move_quality, previous_board
                         )
@@ -357,17 +388,21 @@ Commentary:"""
                         elif move_quality in ["good", "tactical"] or abs(current_eval) > 2.0:
                             priority = 2
                         
+                        logger.info(f"Generated commentary for {move_san}: {commentary_text[:50]}... (priority: {priority})")
+                        
                         event = CommentaryEvent(
                             timestamp=timestamp,
                             text=commentary_text,
                             priority=priority,
-                            move_san=previous_board.san(move_played),
+                            move_san=move_san,
                             evaluation=current_eval
                         )
                         commentary_events.append(event)
                     
                     elif i == 0:  # Opening comment
+                        logger.debug("Generating opening commentary")
                         opening_commentary = self.generate_opening_commentary(board, analysis)
+                        logger.info(f"Generated opening commentary: {opening_commentary[:50]}...")
                         event = CommentaryEvent(
                             timestamp=timestamp,
                             text=opening_commentary,
@@ -381,13 +416,18 @@ Commentary:"""
                     previous_board = board
                     self.move_count += 1
                     
+                    # Add small delay between analyses to prevent overwhelming the engine
+                    await asyncio.sleep(0.1)
+                    
                 except Exception as e:
+                    logger.error(f"Error processing position {i}: {e}")
                     print(f"Error processing position {i}: {e}")
                     continue
         
         finally:
-            self.stop_engine()
+            await self.stop_engine()
         
+        logger.info(f"Analysis complete: generated {len(commentary_events)} commentary events")
         return commentary_events
 
     def save_commentary_script(self, events: List[CommentaryEvent], filename: str):

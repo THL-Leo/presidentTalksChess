@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 import edge_tts
 import torch
 import soundfile as sf
@@ -8,19 +9,19 @@ from typing import List, Dict, Optional
 import tempfile
 from src.chess_commentator import CommentaryEvent
 
+# Enable debug logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
 class PresidentialTTS:
     def __init__(self, rvc_models_dir: str = "rvc_models"):
         self.rvc_models_dir = rvc_models_dir
         self.rvc_inference = None
-        self.device = "cpu"  # Change to "cuda" if you have GPU
+        self.device = "mps"  # Change to "cuda" if you have GPU
         
         # Voice mappings for Edge TTS
         self.base_voices = {
-            "male_1": "en-US-DavisNeural",      # Good base for Trump
-            "male_2": "en-US-JasonNeural",      # Good base for Biden
-            "male_3": "en-US-TonyNeural",       # Good base for Obama
-            "male_4": "en-US-BrianNeural",      # Alternative voice
-            "female_1": "en-US-AriaNeural",     # For variety
+            "male_1": "en-US-GuyNeural"
         }
         
         # Available presidential voices (add as you get more RVC models)
@@ -32,12 +33,12 @@ class PresidentialTTS:
             },
             "biden": {
                 "model_path": os.path.join(rvc_models_dir, "biden", "biden.pth"),
-                "base_voice": "male_2", 
+                "base_voice": "male_1", 
                 "personality": "measured"
             },
             "obama": {
                 "model_path": os.path.join(rvc_models_dir, "obama", "obama.pth"),
-                "base_voice": "male_3",
+                "base_voice": "male_1",
                 "personality": "smooth"
             }
         }
@@ -66,15 +67,26 @@ class PresidentialTTS:
             return True
         except Exception as e:
             print(f"Failed to initialize RVC: {e}")
+            logger.exception("RVC initialization error details:")
             return False
 
     async def generate_base_speech(self, text: str, voice: str, output_path: str):
         """Generate speech using Edge TTS"""
         try:
+            logger.debug(f"Generating TTS: voice={voice}, text='{text[:50]}...', output={output_path}")
             tts = edge_tts.Communicate(text, voice)
             await tts.save(output_path)
-            return True
+            
+            # Verify file was created
+            if os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                logger.debug(f"TTS generated successfully: {file_size} bytes")
+                return True
+            else:
+                logger.error(f"TTS file was not created: {output_path}")
+                return False
         except Exception as e:
+            logger.error(f"Error generating base speech: {e}")
             print(f"Error generating base speech: {e}")
             return False
 
@@ -89,20 +101,11 @@ class PresidentialTTS:
             self.rvc_inference.load_model(model_path)
             
             # Perform voice conversion
-            converted_audio = self.rvc_inference.infer_file(input_audio, output_path)
-            
-            # Handle the conversion result
-            if isinstance(converted_audio, tuple):
-                audio_data = converted_audio[0]
-            else:
-                audio_data = converted_audio
-            
-            # Save as WAV file
-            sf.write(output_path, audio_data, 22050)
-            return True
+            self.rvc_inference.infer_file(input_audio, output_path)
             
         except Exception as e:
             print(f"Error in RVC conversion: {e}")
+            logger.exception("RVC conversion error details:")
             return False
 
     def adjust_text_for_personality(self, text: str, personality: str) -> str:
@@ -147,7 +150,7 @@ class PresidentialTTS:
         adjusted_text = self.adjust_text_for_personality(text, personality)
         
         # Generate base speech with temporary file
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_file:
             temp_path = temp_file.name
         
         try:
@@ -157,6 +160,18 @@ class PresidentialTTS:
             
             # Convert with RVC
             success = self.convert_voice_with_rvc(temp_path, model_path, output_path)
+            
+            if not success:
+                print(f"RVC conversion failed, falling back to base TTS for {president}")
+                # Copy the base TTS file as fallback
+                import shutil
+                try:
+                    shutil.copy2(temp_path, output_path)
+                    print(f"Fallback: copied base TTS to {output_path}")
+                    return True
+                except Exception as copy_error:
+                    print(f"Failed to copy fallback audio: {copy_error}")
+                    return False
             
             return success
             
@@ -168,11 +183,13 @@ class PresidentialTTS:
     async def process_commentary_events(self, events: List[CommentaryEvent], 
                                       president: str, output_dir: str) -> List[Dict]:
         """Process all commentary events and generate audio files"""
+        logger.info(f"Processing {len(events)} commentary events for {president}")
         os.makedirs(output_dir, exist_ok=True)
         
         audio_files = []
         
         for i, event in enumerate(events):
+            logger.debug(f"Processing event {i+1}/{len(events)}: timestamp={event.timestamp:.1f}s, text='{event.text[:50]}...'")
             print(f"Processing commentary {i+1}/{len(events)}: {event.text[:50]}...")
             
             # Generate filename
@@ -192,10 +209,13 @@ class PresidentialTTS:
                     "priority": event.priority,
                     "move_san": event.move_san
                 })
+                logger.info(f"✓ Generated audio file: {audio_filename}")
                 print(f"✓ Generated: {audio_filename}")
             else:
+                logger.error(f"✗ Failed to generate audio: {audio_filename}")
                 print(f"✗ Failed to generate: {audio_filename}")
         
+        logger.info(f"Audio generation complete: {len(audio_files)}/{len(events)} files created")
         return audio_files
 
     async def generate_sample_audio(self, president: str = "trump"):

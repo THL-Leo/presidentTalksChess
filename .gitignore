@@ -1,5 +1,5 @@
 /data
-/.venv
+/venv
 /exp10-new
 /runs
 /stockfish
@@ -12,6 +12,8 @@
 *.mp3
 *.index
 *.pth
+*.png
+*.mp4
 
 .DS_Store
 
@@ -20,7 +22,9 @@
 .env.local
 .env.*.local
 
-env_example.txt
-video.mp4
-README_commentary_system.md
+/test_audio_output
+/env_example.txt
+
 test_gpt_commentary.py
+test_async_engine.py
+test.py

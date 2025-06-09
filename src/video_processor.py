@@ -2,12 +2,17 @@ import os
 import cv2
 import subprocess
 import json
+import logging
 from typing import List, Dict, Tuple
 from src.video_parser import parse_video_by_seconds
 from src.chess_detector import process_frames
 from src.chess_commentator import ChessCommentator, CommentaryEvent
 from src.presidential_tts import generate_presidential_commentary_sync
 import tempfile
+
+# Enable debug logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 class ChessVideoProcessor:
     def __init__(self, stockfish_path: str = "./stockfish/stockfish-macos-m1-apple-silicon"):
@@ -61,12 +66,15 @@ class ChessVideoProcessor:
 
     def parse_video_frames(self, video_path: str, frame_interval: int = 2) -> Tuple[List, List[float]]:
         """Parse video and extract frames with timestamps"""
+        logger.info(f"Parsing video: {video_path}")
+        logger.info(f"Extracting frames every {frame_interval} seconds...")
         print(f"Parsing video: {video_path}")
         print(f"Extracting frames every {frame_interval} seconds...")
         
         # Get video info
         video_info = self.extract_video_info(video_path)
-        fps = video_info.get('fps', 30)
+        fps = video_info.get('fps', 60)
+        logger.debug(f"Video info: fps={fps}, duration={video_info.get('duration', 'unknown')}")
         
         # Extract frames
         frames = parse_video_by_seconds(video_path, frame_interval)
@@ -74,27 +82,30 @@ class ChessVideoProcessor:
         # Calculate timestamps
         timestamps = [i * frame_interval for i in range(len(frames))]
         
+        logger.info(f"Extracted {len(frames)} frames with timestamps: {timestamps}")
         print(f"Extracted {len(frames)} frames")
         return frames, timestamps
 
-    def analyze_chess_positions(self, frames: List, timestamps: List[float]) -> List[str]:
+    async def analyze_chess_positions(self, frames: List, timestamps: List[float]) -> List[str]:
         """Analyze chess positions from video frames"""
         print("Analyzing chess positions...")
         
         # Use existing chess detector
-        fens = process_frames(frames)
+        fens = await process_frames(frames)
         
         print(f"Analyzed {len(fens)} positions")
         return fens
 
-    def generate_commentary(self, fens: List[str], timestamps: List[float], 
+    async def generate_commentary(self, fens: List[str], timestamps: List[float], 
                           openai_api_key: str = None) -> List[CommentaryEvent]:
-        """Generate chess commentary for the positions"""
+        """Generate chess commentary for the positions asynchronously"""
+        logger.info(f"Generating chess commentary for {len(fens)} positions...")
         print("Generating chess commentary...")
         
         commentator = ChessCommentator(self.stockfish_path, openai_api_key)
-        events = commentator.analyze_game_sequence(fens, timestamps)
+        events = await commentator.analyze_game_sequence(fens, timestamps)
         
+        logger.info(f"Commentary generation complete: {len(events)} events created")
         print(f"Generated {len(events)} commentary events")
         return events
 
@@ -209,7 +220,7 @@ class ChessVideoProcessor:
             print(f"Error combining video and audio: {e}")
             return False
 
-    def process_chess_video(self, input_video: str, output_video: str, 
+    async def process_chess_video(self, input_video: str, output_video: str, 
                            president: str = "trump", frame_interval: int = 3, 
                            openai_api_key: str = None) -> bool:
         """Complete pipeline to process chess video with presidential commentary"""
@@ -238,13 +249,13 @@ class ChessVideoProcessor:
                 return False
             
             # Step 3: Analyze chess positions
-            fens = self.analyze_chess_positions(frames, timestamps)
+            fens = await self.analyze_chess_positions(frames, timestamps)
             if not fens:
                 print("❌ No chess positions analyzed")
                 return False
             
             # Step 4: Generate commentary
-            events = self.generate_commentary(fens, timestamps, openai_api_key)
+            events = await self.generate_commentary(fens, timestamps, openai_api_key)
             if not events:
                 print("❌ No commentary generated")
                 return False
@@ -307,10 +318,10 @@ class ChessVideoProcessor:
             print(f"   {i+1}. [{event.timestamp:.1f}s] {event.text}")
 
 # Convenience function for easy use
-def process_chess_video_with_commentary(input_video: str, output_video: str, 
+async def process_chess_video_with_commentary(input_video: str, output_video: str, 
                                        president: str = "trump", 
                                        frame_interval: int = 3,
                                        openai_api_key: str = None) -> bool:
     """Easy-to-use function to process a chess video with presidential commentary"""
     processor = ChessVideoProcessor()
-    return processor.process_chess_video(input_video, output_video, president, frame_interval, openai_api_key) 
+    return await processor.process_chess_video(input_video, output_video, president, frame_interval, openai_api_key) 

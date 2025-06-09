@@ -4,6 +4,7 @@ import cv2
 import chess
 import chess.engine
 import time
+import asyncio
 from ultralytics import YOLO
 
 PIECE_CLASS_MAPPING = {
@@ -11,12 +12,12 @@ PIECE_CLASS_MAPPING = {
     'k': 6, 'q': 7, 'r': 8, 'b': 9, 'n': 10, 'p': 11
 }
 
-def stockfish_check_orientation(fen, engine):
+async def stockfish_check_orientation(fen, engine):
     """Analyze a position using Stockfish and return its evaluation score."""
     try:
         board = chess.Board(fen)
         # Use a very limited depth to avoid engine crashes
-        info = engine.analyse(board, chess.engine.Limit(depth=5, time=0.5))
+        info = await engine.analyse(board, chess.engine.Limit(depth=5, time=0.5))
         score = info["score"].relative
         
         if score.is_mate():
@@ -41,10 +42,11 @@ def correct_fen_if_flipped(fen):
     flipped_fen = flipped_board + " " + " ".join(parts[1:])
     return flipped_fen
 
-def detect_chess_pieces(img=None, img_path=None, prev_state=None, engine=None, count = 0):
+async def detect_chess_pieces(img=None, img_path=None, prev_state=None, engine=None, count = 0):
     """Detect chess pieces on the board and determine correct FEN orientation."""
     current_dir = os.getcwd()
     model_path = os.path.join(current_dir, "model", "best.pt")
+    # model_path = os.path.join(current_dir, "runs", "detect", "train3", "weights", "last.pt")
     
     if img_path:
         img = cv2.imread(img_path)
@@ -54,8 +56,16 @@ def detect_chess_pieces(img=None, img_path=None, prev_state=None, engine=None, c
     
     # img = cv2.resize(img, (400, 400))  # Resize to 400x400
     model = YOLO(model_path)
-    results = model(img, conf=0.8)
-
+    results = model(img, conf=0.6)
+    # show the image with the results then quit the program after q is clicked
+    # for result in results:
+    #     for i, box in enumerate(result.boxes):
+    #         x1, y1, x2, y2 = box.xyxy[0].tolist()
+    #         cv2.rectangle(img, (int(x1), int(y1)), (int(x2), int(y2)), (0, 0, 255), 2)
+    # cv2.imshow("Image", img)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
+    # exit()
 
     board = chess.Board()
     board.clear_board()
@@ -94,40 +104,41 @@ def detect_chess_pieces(img=None, img_path=None, prev_state=None, engine=None, c
 
     new_fen = " ".join(fen_parts)
     print(f"Original FEN: {new_fen}")
+    return new_fen
     
-    # Skip Stockfish orientation check if engine isn't provided
-    if engine is None:
-        return new_fen
-    try:
-        # Simple orientation check - we'll just try the original and flipped orientation
-        score = stockfish_check_orientation(new_fen, engine)
-        flipped_fen = correct_fen_if_flipped(new_fen)
-        print(f"Flipped FEN: {flipped_fen}")
-        flipped_score = stockfish_check_orientation(flipped_fen, engine)
+    # # Skip Stockfish orientation check if engine isn't provided
+    # if engine is None:
+    #     return new_fen
+    # try:
+    #     # Simple orientation check - we'll just try the original and flipped orientation
+    #     score = await stockfish_check_orientation(new_fen, engine)
+    #     flipped_fen = correct_fen_if_flipped(new_fen)
+    #     print(f"Flipped FEN: {flipped_fen}")
+    #     flipped_score = await stockfish_check_orientation(flipped_fen, engine)
         
-        # Choose the FEN with the better score
-        final_fen = flipped_fen if abs(flipped_score) < abs(score) else new_fen
-        print(f'Final Output: {final_fen}')
-        return final_fen
-    except Exception as e:
-        print(f"Error during orientation check: {e}")
-        # If something goes wrong, return the original FEN
-        return new_fen
+    #     # Choose the FEN with the better score
+    #     final_fen = flipped_fen if abs(flipped_score) < abs(score) else new_fen
+    #     print(f'Final Output: {final_fen}')
+    #     return final_fen
+    # except Exception as e:
+    #     print(f"Error during orientation check: {e}")
+    #     # If something goes wrong, return the original FEN
+    #     return new_fen
 
-def process_frames(frames, prev_fen=None):
+async def process_frames(frames, prev_fen=None):
     """Process multiple frames with a single engine instance."""
     engine_path = "./stockfish/stockfish-macos-m1-apple-silicon"
     
     # Start the engine just once
     try:
-        engine = chess.engine.SimpleEngine.popen_uci(engine_path)
+        transport, engine = await chess.engine.popen_uci(engine_path)
         print("Engine started successfully")
         
         fens = []
         for i, frame in enumerate(frames):
             print(f"Processing frame {i+1}/{len(frames)}")
             try:
-                fen = detect_chess_pieces(
+                fen = await detect_chess_pieces(
                     img=frame, 
                     prev_state=prev_fen if prev_fen else None,
                     engine=engine,
@@ -149,7 +160,7 @@ def process_frames(frames, prev_fen=None):
         # Process without engine if it fails to start
         fens = []
         for i, frame in enumerate(frames):
-            fen = detect_chess_pieces(
+            fen = await detect_chess_pieces(
                 img=frame, 
                 prev_state=prev_fen if prev_fen else None,
                 engine=None,  # No engine
@@ -162,11 +173,11 @@ def process_frames(frames, prev_fen=None):
         # Make sure to quit the engine
         if 'engine' in locals():
             try:
-                engine.quit()
+                await engine.quit()
                 print("Engine terminated successfully")
             except Exception as e:
                 print(f"Error terminating engine: {e}")
 
 if __name__ == "__main__":
-    process_frames(frames=[cv2.imread('src/board.png')], prev_fen=None)
+    asyncio.run(process_frames(frames=[cv2.imread('src/board.png')], prev_fen=None))
     # expect 3r1rk1/5qp1/b2bp3/2pp2Pp/8/1P2PN1P/PB3KB1/R2QR3 b - - 0 20

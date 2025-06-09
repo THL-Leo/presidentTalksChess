@@ -1,6 +1,9 @@
-train: /Users/leolee/Documents/github/chessBroadcaster/data1/train
-val: /Users/leolee/Documents/github/chessBroadcaster/data1/val
-test: /Users/leolee/Documents/github/chessBroadcaster/data1/test
+# train: /Users/leolee/Documents/github/chessBroadcaster/data1/train
+# val: /Users/leolee/Documents/github/chessBroadcaster/data1/val
+# test: /Users/leolee/Documents/github/chessBroadcaster/data1/test
+train: /Volumes/ssd/github/presidentTalksChess/data1/train
+val: /Volumes/ssd/github/presidentTalksChess/data1/val
+test: /Volumes/ssd/github/presidentTalksChess/data1/test
 
 nc: 12  # Number of chess piece classes
 names: 
